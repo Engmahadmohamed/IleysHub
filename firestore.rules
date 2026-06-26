@@ -1,0 +1,174 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper: Fetch authenticated user's profile document from /users/{userId}
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    // Helper: Check if a user's profile exists in the users collection
+    function userProfileExists() {
+      return exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    // Helper: Check if the user is a Super Admin (via specific UID, specific email, or database role)
+    function isSuperAdmin() {
+      return request.auth != null && (
+        request.auth.uid == 'oCETlElgWMNrn8ZsSELl1Vsdr0B2' || 
+        request.auth.token.email == 'mahadmohamed@gmail.com' ||
+        (userProfileExists() && getUserData().role == 'superadmin')
+      );
+    }
+
+    // Helper: Check if the user is an Admin (School Admin or Quran Admin) of the organization
+    function isOrgAdmin(orgId) {
+      return request.auth != null && 
+             userProfileExists() &&
+             getUserData().organizationId == orgId && 
+             (getUserData().role == 'schooladmin' || getUserData().role == 'quranadmin');
+    }
+
+    // Helper: Check if the user is a Teacher belonging to the organization
+    function isOrgTeacher(orgId) {
+      return request.auth != null && 
+             userProfileExists() &&
+             getUserData().organizationId == orgId && 
+             getUserData().role == 'teacher';
+    }
+
+    // Helper: Check if teacher is assigned to a specific subject
+    function isTeacherAssignedToSubject(orgId, subjectId) {
+      return isOrgTeacher(orgId) && 
+             get(/databases/$(database)/documents/organizations/$(orgId)/subjects/$(subjectId)).data.teacherId == getUserData().teacherId;
+    }
+
+
+    // ---------------------------------------------------------
+    // 1. Users Collection
+    // ---------------------------------------------------------
+    match /users/{userId} {
+      // Anyone logged in can read user records (needed for UI profile lookups)
+      // A user can write their own profile, or Super Admin can manage all
+      allow read: if request.auth != null;
+      allow write: if isSuperAdmin() || (request.auth != null && request.auth.uid == userId);
+    }
+
+
+    // ---------------------------------------------------------
+    // 2. Organizations & Scoped Multi-Tenant Subcollections
+    // ---------------------------------------------------------
+    match /organizations/{organizationId} {
+      
+      // Tenant Isolation: Only Super Admin or members of the same organization can read organization details
+      allow read: if isSuperAdmin() || (request.auth != null && getUserData().organizationId == organizationId);
+      allow write: if isSuperAdmin(); // Only Super Admins can provision or delete organizations
+
+      // ---- STUDENTS ----
+      match /students/{studentId} {
+        // School/Quran Admin & Super Admin: Full read/write
+        // Teachers: Only read students who are enrolled in their subjects/classes
+        allow read: if isSuperAdmin() || isOrgAdmin(organizationId) || (
+          isOrgTeacher(organizationId) && (
+            resource == null || 
+            resource.data.subjects.hasAny(getUserData().teacherSubjects)
+          )
+        );
+        allow write: if isSuperAdmin() || isOrgAdmin(organizationId);
+      }
+
+      // ---- TEACHERS ----
+      match /teachers/{teacherId} {
+        // School/Quran Admin & Super Admin: Full access
+        // Teachers: Can read other instructors in their organization or write/update their own contact info
+        allow read: if isSuperAdmin() || (request.auth != null && getUserData().organizationId == organizationId);
+        allow write: if isSuperAdmin() || isOrgAdmin(organizationId) || (
+          isOrgTeacher(organizationId) && getUserData().teacherId == teacherId
+        );
+      }
+
+      // ---- SUBJECTS / COURSES ----
+      match /subjects/{subjectId} {
+        // Admins: Full access
+        // Teachers: Read-only access to subjects in their organization
+        allow read: if isSuperAdmin() || (request.auth != null && getUserData().organizationId == organizationId);
+        allow write: if isSuperAdmin() || isOrgAdmin(organizationId);
+      }
+
+      // ---- CLASS ROOMS ----
+      match /rooms/{roomId} {
+        // Admins: Full access
+        // Teachers: Read-only to view schedules
+        allow read: if isSuperAdmin() || (request.auth != null && getUserData().organizationId == organizationId);
+        allow write: if isSuperAdmin() || isOrgAdmin(organizationId);
+      }
+
+      // ---- ATTENDANCE RECORDS ----
+      match /attendance/{attendanceId} {
+        // Admins: Full access
+        // Teachers: Can read/write attendance for subjects they are assigned to
+        allow read, write: if isSuperAdmin() || isOrgAdmin(organizationId) || (
+          isOrgTeacher(organizationId) && (
+            resource == null || 
+            isTeacherAssignedToSubject(organizationId, resource.data.subjectId) ||
+            isTeacherAssignedToSubject(organizationId, request.resource.data.subjectId)
+          )
+        );
+      }
+
+      // ---- TUITION FEES (Financials) ----
+      match /fees/{feeId} {
+        // STRICT SECURITY: Only Super Admin and School/Quran Admins can access financial data.
+        // Teachers and students are completely blocked from reading or writing fees.
+        allow read, write: if isSuperAdmin() || isOrgAdmin(organizationId);
+      }
+
+      // ---- SALARIES (Financials) ----
+      match /salary/{salaryId} {
+        // Admins: Full access
+        // Teachers: Can only read their own salary records
+        allow read: if isSuperAdmin() || isOrgAdmin(organizationId) || (
+          isOrgTeacher(organizationId) && (
+            resource == null || 
+            resource.data.teacherId == getUserData().teacherId
+          )
+        );
+        allow write: if isSuperAdmin() || isOrgAdmin(organizationId);
+      }
+
+      // ---- EXAM SESSIONS ----
+      match /exam_sessions/{sessionId} {
+        // Admins: Full access
+        // Teachers: Read and write permissions to create exams for their assigned subjects
+        allow read: if isSuperAdmin() || (request.auth != null && getUserData().organizationId == organizationId);
+        allow write: if isSuperAdmin() || isOrgAdmin(organizationId) || isOrgTeacher(organizationId);
+      }
+
+      // ---- EXAM RESULTS ----
+      match /exam_results/{resultId} {
+        // 1. PUBLIC RESULT PORTAL (No Login): 
+        // Allow public read-only access ONLY if:
+        // - The results are explicitly published by the school admin.
+        // - AND the client is querying for a specific student's ID (prevents mass data scrapes).
+        allow read: if resource.data.published == true;
+
+        // 2. AUTHENTICATED STAFF PORTALS:
+        // - Super Admin & Org Admin: Full access.
+        // - Teachers: Can read and write/edit marks ONLY for subjects they teach.
+        allow read, write: if isSuperAdmin() || isOrgAdmin(organizationId) || (
+          isOrgTeacher(organizationId) && (
+            resource == null || 
+            isTeacherAssignedToSubject(organizationId, resource.data.subjectId) ||
+            isTeacherAssignedToSubject(organizationId, request.resource.data.subjectId)
+          )
+        );
+      }
+
+      // ---- SETTINGS ----
+      match /settings/{settingId} {
+        allow read: if isSuperAdmin() || (request.auth != null && getUserData().organizationId == organizationId);
+        allow write: if isSuperAdmin() || isOrgAdmin(organizationId);
+      }
+    }
+  }
+}

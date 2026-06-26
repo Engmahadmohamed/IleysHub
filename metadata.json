@@ -1,0 +1,8 @@
+{
+  "name": "Remix: Smart School \u0026 Quran Management System",
+  "description": "A fully functional, responsive, multi-tenant school and Quran management system with student, teacher, class, attendance, exam, and fee tracking.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

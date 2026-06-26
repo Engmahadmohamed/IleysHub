@@ -1,0 +1,95 @@
+{
+  "entities": {
+    "Organization": {
+      "title": "Organization",
+      "description": "Tenant organization representing a school or Quran school",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "ownerName": { "type": "string" },
+        "email": { "type": "string" },
+        "location": { "type": "string" },
+        "monthlySubscription": { "type": "number" },
+        "logoUrl": { "type": "string" },
+        "type": { "type": "string", "enum": ["school", "quran", "both"] },
+        "status": { "type": "string", "enum": ["active", "suspended", "expired"] },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "name", "ownerName", "email", "type", "status"]
+    },
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User account information and roles",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "fullName": { "type": "string" },
+        "role": { "type": "string", "enum": ["superadmin", "schooladmin", "quranadmin", "teacher"] },
+        "organizationId": { "type": "string" },
+        "active": { "type": "boolean" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["uid", "email", "fullName", "role", "organizationId", "active"]
+    },
+    "Student": {
+      "title": "Student",
+      "description": "Student registered within an organization",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "studentId": { "type": "string" },
+        "fullName": { "type": "string" },
+        "studentPhone": { "type": "string" },
+        "parentPhone": { "type": "string" },
+        "address": { "type": "string" },
+        "gender": { "type": "string", "enum": ["male", "female"] },
+        "dob": { "type": "string" },
+        "subjects": { "type": "array" },
+        "fee": { "type": "number" },
+        "profilePhoto": { "type": "string" },
+        "organizationId": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "studentId", "fullName", "gender", "fee", "organizationId"]
+    },
+    "Teacher": {
+      "title": "Teacher",
+      "description": "Teacher profile and schedules",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "fullName": { "type": "string" },
+        "email": { "type": "string" },
+        "phone": { "type": "string" },
+        "salary": { "type": "number" },
+        "subjects": { "type": "array" },
+        "rooms": { "type": "array" },
+        "timeSchedule": { "type": "array" },
+        "profilePhoto": { "type": "string" },
+        "organizationId": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "fullName", "email", "salary", "organizationId"]
+    }
+  },
+  "firestore": {
+    "/organizations/{orgId}": {
+      "schema": "Organization",
+      "description": "Tenant organization configuration and metadata"
+    },
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "System-wide user settings and tenant assignments"
+    },
+    "/organizations/{orgId}/students/{studentId}": {
+      "schema": "Student",
+      "description": "Collection of students registered under an organization"
+    },
+    "/organizations/{orgId}/teachers/{teacherId}": {
+      "schema": "Teacher",
+      "description": "Collection of teachers registered under an organization"
+    }
+  }
+}
